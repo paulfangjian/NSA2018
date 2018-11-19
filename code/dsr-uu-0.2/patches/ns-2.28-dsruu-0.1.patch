@@ -1,0 +1,163 @@
+diff -uprN ns-2.28.orig/Makefile.in ns-2.28/Makefile.in
+--- ns-2.28.orig/Makefile.in	2005-01-25 23:27:16.000000000 +0100
++++ ns-2.28/Makefile.in	2005-06-10 14:55:18.909654284 +0200
+@@ -30,6 +30,10 @@ BINDEST	= @prefix@/bin
+ # Pathname of directory to install the man page
+ MANDEST	= @prefix@/man
+ 
++DSRUU_DIR = dsr-uu
++DSRUU_OBJ = dsr-uu.o
++DSRUU = $(DSRUU_DIR)/$(DSRUU_OBJ)
++
+ BLANK	= # make a blank space.  DO NOT add anything to this line
+ 
+ # The following will be redefined under Windows (see WIN32 lable below)
+@@ -76,7 +80,7 @@ LIB	= \
+ 	@V_LIBS@ \
+ 	@V_LIB_X11@ \
+ 	@V_LIB@ \
+-	-lm @LIBS@
++	-lm @LIBS@ \
+ #	-L@libdir@ \
+ 
+ CFLAGS	= $(CCOPT) $(DEFINE)
+@@ -362,15 +366,18 @@ all: $(NS) $(BUILD_NSE) all-recursive
+ all-recursive:
+ 	for i in $(SUBDIRS); do ( cd $$i; $(MAKE) all; ) done
+ 
+-$(NS): $(OBJ) common/tclAppInit.o Makefile
++$(NS): $(OBJ) $(DSRUU) common/tclAppInit.o Makefile
+ 	$(LINK) $(LDFLAGS) $(LDOUT)$@ \
+-		common/tclAppInit.o $(OBJ) $(LIB)
++		common/tclAppInit.o $(OBJ) $(PWD)/$(DSRUU) $(LIB)
+ 
+ Makefile: Makefile.in
+ 	@echo "Makefile.in is newer than Makefile."
+ 	@echo "You need to re-run configure."
+ 	false
+ 
++$(DSRUU): $(DSRUU_DIR)/*.c $(DSRUU_DIR)/*.h $(DSRUU_DIR)/*.cc $(DSRUU_DIR)/Makefile
++	$(MAKE) -C $(DSRUU_DIR) $(DSRUU_OBJ) NS_DEFS='$(DEFINE) -DNS2' OPTS='$(CCOPT)' NS_INC='$(subst -I.,-I$(shell pwd),$(INCLUDES))'
++
+ $(NSE): $(OBJ) common/tclAppInit.o $(OBJ_EMULATE_CC) $(OBJ_EMULATE_C)
+ 	$(LINK) $(LDFLAGS) $(LDOUT)$@ \
+ 		common/tclAppInit.o $(OBJ) \
+@@ -488,7 +495,8 @@ install-recursive: force
+ 	for i in $(SUBDIRS); do ( cd $$i; $(MAKE) install; ) done
+ 
+ clean:
+-	$(RM) $(CLEANFILES)
++	$(RM) $(CLEANFILES) 
++	$(MAKE) -C dsr-uu clean
+ 
+ AUTOCONF_GEN = tcl/lib/ns-autoconf.tcl
+ distclean: distclean-recursive
+diff -uprN ns-2.28.orig/tcl/lib/ns-default.tcl ns-2.28/tcl/lib/ns-default.tcl
+--- ns-2.28.orig/tcl/lib/ns-default.tcl	2005-01-19 19:23:37.000000000 +0100
++++ ns-2.28/tcl/lib/ns-default.tcl	2005-06-10 14:55:33.637476019 +0200
+@@ -1343,3 +1343,30 @@ Queue set util_records_ 0
+ # Quick Start definitions end here
+ 
+ Delayer set debug_ false
++
++
++# DSR-UU configuration values. NOTE, these values are overridden with
++# the values in dsr.h when nodes are created. Do not change these
++# values. See the DSR-UU README how to set these values at runtime.
++Agent/DSRUU set PrintDebug_ 0
++Agent/DSRUU set FlushLinkCache_ 1
++Agent/DSRUU set PromiscOperation_ 1 
++Agent/DSRUU set BroadCastJitter_ 20
++Agent/DSRUU set RouteCacheTimeout_ 300
++Agent/DSRUU set SendBufferTimeout_ 30
++Agent/DSRUU set SendBufferSize_ 100
++Agent/DSRUU set RequestTableSize_ 64
++Agent/DSRUU set RequestTableIds_ 16
++Agent/DSRUU set MaxRequestRexmt_ 16
++Agent/DSRUU set MaxRequestPeriod_ 10
++Agent/DSRUU set RequestPeriod_ 500
++Agent/DSRUU set NonpropRequestTimeout_ 30
++Agent/DSRUU set RexmtBufferSize_ 50
++Agent/DSRUU set MaintHoldoffTime_ 250
++Agent/DSRUU set MaxMaintRexmt_ 2 
++Agent/DSRUU set UseNetworkLayerAck_ 0
++Agent/DSRUU set TryPassiveAcks_ 1
++Agent/DSRUU set PassiveAckTimeout_ 100
++Agent/DSRUU set GratReplyHoldOff_ 1
++Agent/DSRUU set MAX_SALVAGE_COUNT_ 15
++
+diff -uprN ns-2.28.orig/tcl/lib/ns-lib.tcl ns-2.28/tcl/lib/ns-lib.tcl
+--- ns-2.28.orig/tcl/lib/ns-lib.tcl	2005-01-24 21:03:43.000000000 +0100
++++ ns-2.28/tcl/lib/ns-lib.tcl	2005-06-10 14:55:33.637476019 +0200
+@@ -32,7 +32,7 @@
+ # SUCH DAMAGE.
+ #
+ 
+-# @(#) $Header$
++# @(#) $Header$
+ 
+ 
+ #
+@@ -597,6 +597,9 @@ Simulator instproc create-wireless-node 
+ 	    DSR {
+ 		    $self at 0.0 "$node start-dsr"
+ 	    }
++	    DSRUU {
++		    $self at 0.0 "$node start-dsr"
++	    }
+ 	    AODV {
+ 		    set ragent [$self create-aodv-agent $node]
+ 	    }
+@@ -652,7 +655,7 @@ Simulator instproc create-wireless-node 
+ 	    $ifqType_ $ifqlen_ $phyType_ $antType_ $topoInstance_ \
+ 			$inerrProc_ $outerrProc_ $FECProc_
+ 	# Attach agent
+-	if {$routingAgent_ != "DSR"} {
++	if {$routingAgent_ != "DSR" && $routingAgent_ != "DSRUU"} {
+ 		$node attach $ragent [Node set rtagent_port_]
+ 	}
+ 	if {$routingAgent_ == "DIFFUSION/RATE" ||
+@@ -672,7 +675,7 @@ Simulator instproc create-wireless-node 
+ 	# Bind routing agent and mip agent if existing basestation 
+ 	# address setting
+         if { [info exist wiredRouting_] && $wiredRouting_ == "ON" } {
+-		if { $routingAgent_ != "DSR" } {
++		if { $routingAgent_ != "DSR" && $routingAgent_ != "DSRUU"} {
+ 			$node mip-call $ragent
+ 		}
+ 	}
+@@ -721,7 +724,7 @@ Simulator instproc create-wireless-node 
+ Simulator instproc create-node-instance args {
+ 	$self instvar routingAgent_
+ 	# DSR is a special case
+-	if {$routingAgent_ == "DSR"} {
++	if {$routingAgent_ == "DSR" || $routingAgent_ == "DSRUU"} {
+ 		set nodeclass [$self set-dsr-nodetype]
+ 	} else {
+ 		set nodeclass Node/MobileNode
+diff -uprN ns-2.28.orig/tcl/lib/ns-mobilenode.tcl ns-2.28/tcl/lib/ns-mobilenode.tcl
+--- ns-2.28.orig/tcl/lib/ns-mobilenode.tcl	2005-01-26 00:29:14.000000000 +0100
++++ ns-2.28/tcl/lib/ns-mobilenode.tcl	2005-06-10 14:55:33.637476019 +0200
+@@ -31,7 +31,7 @@
+ # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ # SUCH DAMAGE.
+ #
+-# $Header$
++# $Header$
+ #
+ # Ported from CMU-Monarch project's mobility extensions -Padma, 10/98.
+ #
+@@ -775,7 +775,12 @@ SRNodeNew instproc init args {
+ 		# Use the default mash and shift
+ 		set dmux_ [new Classifier/Port]
+ 	}
+-	set dsr_agent_ [new Agent/DSRAgent]
++
++	if { [$ns set routingAgent_] == "DSRUU" } {
++		set dsr_agent_ [new Agent/DSRUU]
++	} else {
++		set dsr_agent_ [new Agent/DSRAgent]
++	}
+ 
+ 	# setup address (supports hier-address) for dsragent
+ 	$dsr_agent_ addr $address_
